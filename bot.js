@@ -10,8 +10,8 @@ const CONFIG = {
     CLIENT_ID: process.env.CLIENT_ID, // Replace with your bot's client ID
     GUILD_ID: process.env.GUILD_ID, // Replace with your server ID
     CHANNEL_ID: process.env.CHANNEL_ID,
-    DATA_FILE: process.env.DATA_FILE,
-    EXCEL_FILE: process.env.EXCEL_FILE
+    DATA_FILE: process.env.DATA_FILE || "boss_respawns.json",
+    EXCEL_FILE: process.env.EXCEL_FILE || "boss_respawns.xlsx"
 };
 
 // Slash commands definition
