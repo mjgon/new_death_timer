@@ -82,6 +82,23 @@ class BossTracker {
         this.loadData();
     }
 
+    async cleanupRespawnedBosses() {
+    const now = new Date();
+    let removed = 0;
+
+    for (const [key, boss] of this.bosses.entries()) {
+        if (new Date(boss.nextRespawn) <= now) {
+            this.bosses.delete(key);
+            removed++;
+        }
+    }
+
+    if (removed > 0) {
+        console.log(`🗑️ Removed ${removed} respawned bosses`);
+        await this.saveData();
+    }
+}
+
     async loadData() {
         try {
             const data = await fs.readFile(this.dataFile, 'utf8');
@@ -265,6 +282,7 @@ parseMessage(content) {
 
         this.bosses.set(bossName.toLowerCase(), bossData);
         await this.saveData();
+        await this.cleanupRespawnedBosses();
         
         return bossData;
     }
@@ -287,7 +305,8 @@ parseMessage(content) {
 
         this.bosses.set(bossKey, existingBoss);
         await this.saveData();
-        
+        await this.cleanupRespawnedBosses();
+
         return existingBoss;
     }
 
@@ -301,6 +320,7 @@ parseMessage(content) {
 
         this.bosses.delete(bossKey);
         await this.saveData();
+        await this.cleanupRespawnedBosses();
         
         return boss;
     }
@@ -355,6 +375,8 @@ client.once('ready', async () => {
     
     // Register slash commands
     await registerCommands();
+
+    setInterval(() => bossTracker.cleanupRespawnedBosses(), 5 * 60 * 1000);
 });
 
 client.on('messageCreate', async (message) => {
