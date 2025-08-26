@@ -1,0 +1,61 @@
+{
+  "lastUpdated": "2025-08-26T11:12:38.952Z",
+  "bosses": [
+    [
+      "testing",
+      {
+        "name": "Testing",
+        "deathTime": "18:27",
+        "respawnDuration": "1hrs",
+        "respawnMinutes": 60,
+        "lastDeath": "2025-08-26T10:27:00.000Z",
+        "nextRespawn": "2025-08-26T11:27:00.000Z",
+        "isActive": true,
+        "messageId": "1409847725972787264",
+        "addedAt": "2025-08-26T10:31:31.175Z"
+      }
+    ],
+    [
+      "sample1",
+      {
+        "name": "Sample1",
+        "deathTime": "18:33",
+        "respawnDuration": "2hrs",
+        "respawnMinutes": 120,
+        "lastDeath": "2025-08-26T10:33:00.000Z",
+        "nextRespawn": "2025-08-26T12:33:00.000Z",
+        "isActive": true,
+        "messageId": "1409848222012149761",
+        "addedAt": "2025-08-26T10:33:29.424Z"
+      }
+    ],
+    [
+      "testing1",
+      {
+        "name": "Testing1",
+        "deathTime": "18:55",
+        "respawnDuration": "2hrs",
+        "respawnMinutes": 120,
+        "lastDeath": "2025-08-26T10:55:00.000Z",
+        "nextRespawn": "2025-08-26T12:55:00.000Z",
+        "isActive": true,
+        "messageId": "1409853677937758311",
+        "addedAt": "2025-08-26T10:55:10.250Z"
+      }
+    ],
+    [
+      "testing2",
+      {
+        "name": "Testing2",
+        "deathTime": "18:12",
+        "respawnDuration": "1hrs",
+        "respawnMinutes": 60,
+        "lastDeath": "2025-08-26T10:12:00.000Z",
+        "nextRespawn": "2025-08-26T11:12:00.000Z",
+        "isActive": false,
+        "messageId": "1409858077020131418",
+        "addedAt": "2025-08-26T11:12:38.952Z"
+      }
+    ]
+  ]
+}
