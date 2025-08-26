@@ -218,47 +218,63 @@ parseMessage(content) {
         return hours * 60; // Return total minutes
     }
 
-    calculateRespawnTime(deathTime, respawnMinutes) {
-        // Get current time in Philippine timezone
-        const now = new Date();
-        const philippineNow = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Manila"}));
-        const [hours, minutes] = deathTime.split(':').map(Number);
-        // Create death time for today in Philippine time
-        const deathDateTime = new Date(philippineNow);
-        deathDateTime.setHours(hours, minutes, 0, 0);
-        // If death time is in the future (next day scenario), set it to yesterday
-        if (deathDateTime > philippineNow) {
-            deathDateTime.setDate(deathDateTime.getDate() - 1);
-        }
-        // Calculate respawn time
-        const respawnDateTime = new Date(deathDateTime.getTime() + (respawnMinutes * 60000));
-        return {
-            deathDateTime,
-            respawnDateTime,
-            isActive: respawnDateTime > philippineNow
-        };
+calculateRespawnTime(deathTime, respawnMinutes) {
+    const [h, m] = deathTime.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) {
+        throw new Error('Invalid death time (HH:MM expected)');
     }
 
+    const now = new Date();
 
+    // Get today's date in Manila (YYYY, MM, DD)
+    const dParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(now);
+    const year  = parseInt(dParts.find(p => p.type === 'year').value, 10);
+    const month = parseInt(dParts.find(p => p.type === 'month').value, 10);
+    let   day   = parseInt(dParts.find(p => p.type === 'day').value, 10);
 
-    formatDateTime(date) {
+    // Current time-of-day in Manila for “yesterday if future” rule
+    const tParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila',
+        hour: '2-digit', minute: '2-digit', hour12: false
+    }).formatToParts(now);
+    const curH = parseInt(tParts.find(p => p.type === 'hour').value, 10);
+    const curM = parseInt(tParts.find(p => p.type === 'minute').value, 10);
 
-        // Convert to Philippine time (GMT+8)
-
-        const philippineTime = new Date(date.getTime() + (8 * 60 * 60 * 1000));
-
-        return philippineTime.toLocaleString('en-PH', {
-            timeZone: 'Asia/Manila',
-            month: '2-digit',
-            day: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
-
+    // If entered death time is in the future vs "now in Manila", treat it as yesterday
+    if (h > curH || (h === curH && m > curM)) {
+        day -= 1;
     }
 
+    // Build a UTC instant for Manila wall-clock (Manila is UTC+8 -> subtract 8 hours)
+    const deathUTCms   = Date.UTC(year, month - 1, day, h - 8, m, 0, 0);
+    const respawnUTCms = deathUTCms + respawnMinutes * 60 * 1000;
+
+    const deathDateTime   = new Date(deathUTCms);
+    const respawnDateTime = new Date(respawnUTCms);
+
+    return {
+        deathDateTime,
+        respawnDateTime,
+        isActive: respawnUTCms > Date.now()
+    };
+}
+
+
+
+  formatDateTime(date) {
+    return new Intl.DateTimeFormat('en-PH', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(date);
+}
     async addBoss(deathTime, bossName, respawnDuration, messageId) {
         const respawnMinutes = this.parseRespawnDuration(respawnDuration);
         
