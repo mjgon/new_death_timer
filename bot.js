@@ -2,13 +2,14 @@ const { Client, GatewayIntentBits, EmbedBuilder, SlashCommandBuilder, REST, Rout
 const fs = require('fs').promises;
 const path = require('path');
 const ExcelJS = require('exceljs');
+require('dotenv').config();
 
 // Bot configuration
 const CONFIG = {
-    TOKEN: '***REMOVED***', // Replace with your actual token
-    CLIENT_ID: '1406601927109640272', // Replace with your bot's client ID
-    GUILD_ID: '1406615426384920607', // Replace with your server ID
-    CHANNEL_ID: '1406684780640342247',
+    TOKEN: process.env.TOKEN, // Replace with your actual token
+    CLIENT_ID: process.env.CLIENT_ID, // Replace with your bot's client ID
+    GUILD_ID: process.env.GUILD_ID, // Replace with your server ID
+    CHANNEL_ID: process.env.CHANNEL_ID,
     DATA_FILE: 'boss_respawns.json',
     EXCEL_FILE: 'boss_respawns.xlsx'
 };
