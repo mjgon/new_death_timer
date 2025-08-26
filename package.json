@@ -1,7 +1,14 @@
 {
+  "name": "new_death_timer",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "scripts": {
+      "start": "node bot.js"
+  },
   "dependencies": {
-    "discord.js": "^14.22.1",
-    "dotenv": "^17.2.1",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
     "exceljs": "^4.4.0"
   }
+  
 }
