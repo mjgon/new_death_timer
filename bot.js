@@ -8,7 +8,8 @@ const CONFIG = {
     GUILD_ID: process.env.GUILD_ID,
     INPUT_CHANNEL_ID: process.env.INPUT_CHANNEL_ID,
     OUTPUT_CHANNEL_ID: process.env.OUTPUT_CHANNEL_ID,
-    STORAGE_CHANNEL_ID: process.env.STORAGE_CHANNEL_ID // Private channel for data storage
+    STORAGE_CHANNEL_ID: process.env.STORAGE_CHANNEL_ID, // Private channel for data storage
+    NOTIFICATION_CHANNEL_ID: process.env.NOTIFICATION_CHANNEL_ID // Channel for spawn notifications
 };
 
 // Slash commands definition
@@ -41,7 +42,11 @@ const commands = [
     
     new SlashCommandBuilder()
         .setName('cleanup_storage')
-        .setDescription('Clean up respawned bosses from storage (Admin only)')
+        .setDescription('Clean up respawned bosses from storage (Admin only)'),
+    
+    new SlashCommandBuilder()
+        .setName('check_spawns')
+        .setDescription('Manually check for boss spawns (Admin only)')
 ].map(command => command.toJSON());
 
 // Register slash commands
@@ -72,8 +77,10 @@ const client = new Client({
 class BossTracker {
     constructor() {
         this.storageChannel = null;
+        this.notificationChannel = null;
         this.bosses = new Map(); // Cache for faster access
         this.initialized = false;
+        this.notifiedBosses = new Set(); // Track which bosses we've already notified about
     }
 
     async initialize() {
@@ -82,6 +89,11 @@ class BossTracker {
         this.storageChannel = client.channels.cache.get(CONFIG.STORAGE_CHANNEL_ID);
         if (!this.storageChannel) {
             throw new Error('Storage channel not found! Make sure STORAGE_CHANNEL_ID is correct.');
+        }
+        
+        this.notificationChannel = client.channels.cache.get(CONFIG.NOTIFICATION_CHANNEL_ID);
+        if (!this.notificationChannel) {
+            throw new Error('Notification channel not found! Make sure NOTIFICATION_CHANNEL_ID is correct.');
         }
         
         await this.loadBossesFromChannel();
@@ -198,6 +210,9 @@ class BossTracker {
 
         for (const [key, boss] of this.bosses.entries()) {
             if (new Date(boss.nextRespawn) <= now) {
+                // Check if we need to send spawn notification
+                await this.sendSpawnNotification(boss);
+                
                 // Delete the message from storage channel
                 try {
                     const message = await this.storageChannel.messages.fetch(boss.messageId);
@@ -214,6 +229,56 @@ class BossTracker {
 
         if (removed > 0) {
             console.log(`🗑️ Removed ${removed} respawned bosses:`, removedBosses.map(b => b.name));
+        }
+    }
+
+    async sendSpawnNotification(boss) {
+        // Check if we already notified about this boss spawn
+        const notificationKey = `${boss.name.toLowerCase()}_${boss.nextRespawn}`;
+        if (this.notifiedBosses.has(notificationKey)) {
+            return; // Already notified
+        }
+
+        try {
+            const embed = new EmbedBuilder()
+                .setTitle('🚨 BOSS RESPAWNED! 🚨')
+                .setColor(0xFF0000) // Bright red for attention
+                .addFields([
+                    { name: '👹 Boss', value: `**${boss.name}**`, inline: true },
+                    { name: '💀 Died At', value: boss.deathTime, inline: true },
+                    { name: '⏰ Respawn Time', value: this.formatDateTime(new Date(boss.nextRespawn)), inline: true }
+                ])
+                .setThumbnail('https://cdn.discordapp.com/emojis/853629533855113236.png') // Optional: boss icon
+                .setTimestamp()
+                .setFooter({ text: 'Time to hunt! Good luck everyone! 🗡️' });
+
+            await this.notificationChannel.send({
+                content: '@everyone 🔔 **BOSS ALERT!** 🔔',
+                embeds: [embed]
+            });
+
+            // Mark this boss as notified
+            this.notifiedBosses.add(notificationKey);
+            console.log(`🚨 Sent spawn notification for: ${boss.name}`);
+            
+        } catch (error) {
+            console.error(`Error sending spawn notification for ${boss.name}:`, error);
+        }
+    }
+
+    async checkForSpawns() {
+        if (!this.initialized) await this.initialize();
+        
+        const now = new Date();
+        
+        for (const [key, boss] of this.bosses.entries()) {
+            const respawnTime = new Date(boss.nextRespawn);
+            const notificationKey = `${boss.name.toLowerCase()}_${boss.nextRespawn}`;
+            
+            // If boss has respawned and we haven't notified yet
+            if (respawnTime <= now && !this.notifiedBosses.has(notificationKey)) {
+                await this.sendSpawnNotification(boss);
+            }
         }
     }
 
@@ -460,6 +525,7 @@ client.once('ready', async () => {
     console.log(`📥 Input channel: ${CONFIG.INPUT_CHANNEL_ID}`);
     console.log(`📤 Output channel: ${CONFIG.OUTPUT_CHANNEL_ID}`);
     console.log(`💾 Storage channel: ${CONFIG.STORAGE_CHANNEL_ID}`);
+    console.log(`🚨 Notification channel: ${CONFIG.NOTIFICATION_CHANNEL_ID}`);
     
     // Initialize boss tracker
     try {
@@ -472,7 +538,10 @@ client.once('ready', async () => {
     // Register slash commands
     await registerCommands();
 
-    // Cleanup interval (every 5 minutes)
+    // Check for spawns every 30 seconds (more frequent checking)
+    setInterval(() => bossTracker.checkForSpawns(), 30 * 1000);
+    
+    // Cleanup respawned bosses every 5 minutes
     setInterval(() => bossTracker.cleanupRespawnedBosses(), 5 * 60 * 1000);
 });
 
@@ -648,6 +717,16 @@ client.on('interactionCreate', async (interaction) => {
                 
                 await bossTracker.cleanupRespawnedBosses();
                 await interaction.reply('✅ Storage cleanup completed!');
+                break;
+
+            case 'check_spawns':
+                if (!interaction.member.permissions.has('ADMINISTRATOR')) {
+                    await interaction.reply('❌ You need administrator permissions to use this command.');
+                    return;
+                }
+                
+                await bossTracker.checkForSpawns();
+                await interaction.reply('✅ Manual spawn check completed!');
                 break;
         }
     } catch (error) {
