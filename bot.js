@@ -32,6 +32,10 @@ const commands = [
         ),
 
     new SlashCommandBuilder()
+    .setName('recover_from_input')
+    .setDescription('Recover all boss data from input channel messages (Admin only)'),
+
+    new SlashCommandBuilder()
         .setName('recover_bosses')
         .setDescription('List all tracked bosses (active and respawned)'),
     
@@ -183,36 +187,46 @@ class BossTracker {
     }
 
     parseBossEmbed(embed, messageId) {
-        try {
-            const fields = embed.fields;
-            if (!fields || fields.length < 6) return null;
-            
-            const bossData = {
-                name: fields.find(f => f.name === '👹 Boss')?.value,
-                deathTime: fields.find(f => f.name === '💀 Death Time')?.value,
-                respawnDuration: fields.find(f => f.name === '⏱️ Respawn Duration')?.value,
-                lastDeath: fields.find(f => f.name === '🕒 Last Death')?.value,
-                nextRespawn: fields.find(f => f.name === '🔄 Next Respawn')?.value,
-                addedAt: fields.find(f => f.name === '📅 Added At')?.value,
-                messageId: messageId,
-                hasNotified: false // Default to not notified
-            };
-            
-            // Validate required fields
-            if (!bossData.name || !bossData.deathTime || !bossData.respawnDuration || 
-                !bossData.lastDeath || !bossData.nextRespawn) {
-                console.log('Missing required fields in boss embed');
-                return null;
-            }
-            
-            console.log('Successfully parsed boss from embed:', bossData.name);
-            return bossData;
-        } catch (error) {
-            console.error('Error parsing boss embed:', error);
+    try {
+        const fields = embed.fields;
+        if (!fields || fields.length < 6) return null;
+        
+        const bossData = {
+            name: fields.find(f => f.name === '👹 Boss')?.value,
+            deathTime: fields.find(f => f.name === '💀 Death Time')?.value,
+            respawnDuration: fields.find(f => f.name === '⏱️ Respawn Duration')?.value,
+            lastDeath: fields.find(f => f.name === '🕒 Last Death')?.value,
+            nextRespawn: fields.find(f => f.name === '🔄 Next Respawn')?.value,
+            addedAt: fields.find(f => f.name === '📅 Added At')?.value,
+            messageId: messageId,
+            hasNotified: false // Default value
+        };
+        
+        // Check for notification status field (might not exist in old embeds)
+        const notifiedField = fields.find(f => f.name === '🚨 Notified');
+        if (notifiedField) {
+            bossData.hasNotified = notifiedField.value.toLowerCase() === 'yes';
+        } else {
+            // If field doesn't exist, check if boss has already respawned
+            const now = new Date();
+            const respawnTime = new Date(bossData.nextRespawn);
+            bossData.hasNotified = respawnTime <= now; // If already respawned, assume notified
+        }
+        
+        // Validate required fields
+        if (!bossData.name || !bossData.deathTime || !bossData.respawnDuration || 
+            !bossData.lastDeath || !bossData.nextRespawn) {
+            console.log('Missing required fields in boss embed');
             return null;
         }
+        
+        console.log('Successfully parsed boss from embed:', bossData.name);
+        return bossData;
+    } catch (error) {
+        console.error('Error parsing boss embed:', error);
+        return null;
     }
-
+}
     async cleanupRespawnedBosses() {
         if (!this.initialized) await this.initialize();
         
@@ -288,6 +302,88 @@ class BossTracker {
             }
         }
     }
+
+    async recoverFromInputChannel() {
+    if (!this.initialized) await this.initialize();
+    
+    try {
+        console.log('🔄 Starting recovery from input channel...');
+        
+        const inputChannel = client.channels.cache.get(CONFIG.INPUT_CHANNEL_ID);
+        if (!inputChannel) {
+            throw new Error('Input channel not found!');
+        }
+        
+        // Fetch messages from input channel (increase limit as needed)
+        const messages = await inputChannel.messages.fetch({ limit: 100 });
+        
+        let recoveredCount = 0;
+        const recoveredBosses = [];
+        
+        // Process messages in chronological order (oldest first)
+        const sortedMessages = Array.from(messages.values()).reverse();
+        
+        for (const message of sortedMessages) {
+            // Skip bot messages
+            if (message.author.bot) continue;
+            
+            // Try to parse each message
+            const parsed = this.parseMessage(message.content);
+            if (!parsed) continue;
+            
+            const { deathTime, bossName, respawnDuration } = parsed;
+            
+            try {
+                const respawnMinutes = this.parseRespawnDuration(respawnDuration);
+                if (!respawnMinutes) continue;
+                
+                const timeData = this.calculateRespawnTime(deathTime, respawnMinutes);
+                const now = new Date();
+                
+                // Only recover bosses that haven't respawned yet
+                if (timeData.respawnDateTime > now) {
+                    const bossData = {
+                        name: bossName,
+                        deathTime,
+                        respawnDuration,
+                        respawnMinutes,
+                        lastDeath: timeData.deathDateTime.toISOString(),
+                        nextRespawn: timeData.respawnDateTime.toISOString(),
+                        isActive: true,
+                        inputMessageId: message.id,
+                        addedAt: message.createdAt.toISOString(),
+                        hasNotified: false
+                    };
+                    
+                    // Check if we already have this boss (keep the most recent one)
+                    const existingBoss = this.bosses.get(bossName.toLowerCase());
+                    if (!existingBoss || new Date(bossData.lastDeath) > new Date(existingBoss.lastDeath)) {
+                        // Save to storage channel
+                        const storageMessageId = await this.saveBossToChannel(bossData);
+                        bossData.messageId = storageMessageId;
+                        
+                        this.bosses.set(bossName.toLowerCase(), bossData);
+                        recoveredBosses.push(bossData);
+                        recoveredCount++;
+                        
+                        console.log(`✅ Recovered: ${bossName} (respawns: ${this.formatDateTime(timeData.respawnDateTime)})`);
+                    }
+                } else {
+                    console.log(`⏭️ Skipped already respawned boss: ${bossName}`);
+                }
+                
+            } catch (error) {
+                console.log(`❌ Error processing boss ${bossName}:`, error.message);
+            }
+        }
+        
+        return { recoveredCount, recoveredBosses };
+        
+    } catch (error) {
+        console.error('Error recovering from input channel:', error);
+        throw error;
+    }
+}
 
     parseMessage(content) {
         console.log(`Parsing message: "${content}"`);
@@ -768,6 +864,49 @@ client.on('interactionCreate', async (interaction) => {
     } catch (error) {
         console.error('Error recovering bosses:', error);
         await interaction.editReply(`❌ Error recovering bosses: ${error.message}`);
+    }
+    break;
+
+    case 'recover_from_input':
+    if (!interaction.member.permissions.has('ADMINISTRATOR')) {
+        await interaction.reply('❌ You need administrator permissions to use this command.');
+        return;
+    }
+    
+    await interaction.deferReply();
+    
+    try {
+        const { recoveredCount, recoveredBosses } = await bossTracker.recoverFromInputChannel();
+        
+        const recoveryEmbed = new EmbedBuilder()
+            .setTitle('🔄 Boss Recovery from Input Channel')
+            .setColor(0x00FF00)
+            .addFields([
+                { name: '📊 Bosses Recovered', value: `${recoveredCount}`, inline: true },
+                { name: '🟢 Active Bosses', value: `${bossTracker.getActiveBosses().length}`, inline: true },
+                { name: '📝 Total in Database', value: `${bossTracker.getAllBosses().length}`, inline: true }
+            ])
+            .setTimestamp()
+            .setFooter({ text: 'Recovery completed - only active bosses were recovered' });
+
+        if (recoveredBosses.length > 0) {
+            const previewText = recoveredBosses.slice(0, 8).map(boss => {
+                const timeLeft = bossTracker.getTimeUntilRespawn(boss);
+                return `🟢 ${boss.name} (${timeLeft.hours}h ${timeLeft.minutes}m left)`;
+            }).join('\n');
+            
+            recoveryEmbed.addFields({
+                name: '👁️ Recovered Bosses Preview',
+                value: previewText + (recoveredBosses.length > 8 ? `\n... and ${recoveredBosses.length - 8} more` : ''),
+                inline: false
+            });
+        }
+
+        await interaction.editReply({ embeds: [recoveryEmbed] });
+        
+    } catch (error) {
+        console.error('Error in recovery command:', error);
+        await interaction.editReply(`❌ Error during recovery: ${error.message}`);
     }
     break;
 
