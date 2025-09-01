@@ -19,7 +19,7 @@ const commands = [
         .setDescription('List all active boss respawns'),
     
     new SlashCommandBuilder()
-        .setName('allbosses')
+        .setName('allbosses1')
         .setDescription('List all tracked bosses (active and respawned)'),
     
     new SlashCommandBuilder()
@@ -30,6 +30,10 @@ const commands = [
                 .setDescription('Boss name to check')
                 .setRequired(true)
         ),
+
+    new SlashCommandBuilder()
+        .setName('recover_bosses')
+        .setDescription('List all tracked bosses (active and respawned)'),
     
     new SlashCommandBuilder()
         .setName('remove_boss')
@@ -48,6 +52,8 @@ const commands = [
         .setName('check_spawns')
         .setDescription('Manually check for boss spawns (Admin only)')
 ].map(command => command.toJSON());
+
+
 
 // Register slash commands
 const rest = new REST({ version: '10' }).setToken(CONFIG.TOKEN);
@@ -646,30 +652,119 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply({ embeds: [embed] });
                 break;
 
-            case 'allbosses':
-                const allBosses = bossTracker.getAllBosses();
-                
-                if (allBosses.length === 0) {
-                    await interaction.reply('📭 No bosses in the database.');
-                    return;
-                }
+           case 'allbosses1':
+    const allBosses = bossTracker.getAllBosses();
+    
+    if (allBosses.length === 0) {
+        await interaction.reply('📭 No bosses in the database.');
+        return;
+    }
 
-                const allEmbed = new EmbedBuilder()
-                    .setTitle('📋 All Tracked Bosses')
-                    .setColor(0x800080)
-                    .setTimestamp();
+    const pageSize = 20; // Show 20 bosses per page (max 25 fields per embed)
+    const totalPages = Math.ceil(allBosses.length / pageSize);
+    
+    if (totalPages === 1) {
+        // Single page - show all bosses
+        const allEmbed = new EmbedBuilder()
+            .setTitle(`📋 All Tracked Bosses (${allBosses.length} total)`)
+            .setColor(0x800080)
+            .setTimestamp();
 
-                allBosses.slice(0, 10).forEach((boss, index) => {
-                    const status = new Date(boss.nextRespawn) > Date.now() ? '🟢 Active' : '🔴 Respawned';
-                    allEmbed.addFields({
-                        name: `${index + 1}. ${boss.name}`,
-                        value: `Status: ${status}\nLast Death: ${boss.deathTime}\nRespawn Time: ${boss.respawnDuration}`,
-                        inline: true
-                    });
+        allBosses.forEach((boss, index) => {
+            const status = new Date(boss.nextRespawn) > Date.now() ? '🟢 Active' : '🔴 Respawned';
+            allEmbed.addFields({
+                name: `${index + 1}. ${boss.name}`,
+                value: `Status: ${status}\nLast Death: ${boss.deathTime}\nRespawn Time: ${boss.respawnDuration}`,
+                inline: true
+            });
+        });
+
+        await interaction.reply({ embeds: [allEmbed] });
+    } else {
+        // Multiple pages - send first page and subsequent pages
+        const embeds = [];
+        
+        for (let page = 0; page < totalPages; page++) {
+            const startIndex = page * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, allBosses.length);
+            const pageBosses = allBosses.slice(startIndex, endIndex);
+            
+            const pageEmbed = new EmbedBuilder()
+                .setTitle(`📋 All Tracked Bosses - Page ${page + 1}/${totalPages} (${allBosses.length} total)`)
+                .setColor(0x800080)
+                .setTimestamp();
+
+            pageBosses.forEach((boss, index) => {
+                const status = new Date(boss.nextRespawn) > Date.now() ? '🟢 Active' : '🔴 Respawned';
+                const globalIndex = startIndex + index + 1;
+                pageEmbed.addFields({
+                    name: `${globalIndex}. ${boss.name}`,
+                    value: `Status: ${status}\nLast Death: ${boss.deathTime}\nRespawn Time: ${boss.respawnDuration}`,
+                    inline: true
                 });
+            });
+            
+            embeds.push(pageEmbed);
+        }
+        
+        // Send first embed as reply
+        await interaction.reply({ embeds: [embeds[0]] });
+        
+        // Send remaining embeds as follow-ups
+        for (let i = 1; i < embeds.length; i++) {
+            await interaction.followUp({ embeds: [embeds[i]] });
+        }
+    }
+    break;
 
-                await interaction.reply({ embeds: [allEmbed] });
-                break;
+    case 'recover_bosses':
+    if (!interaction.member.permissions.has('ADMINISTRATOR')) {
+        await interaction.reply('❌ You need administrator permissions to use this command.');
+        return;
+    }
+    
+    await interaction.deferReply();
+    
+    try {
+        // Force reload from storage channel
+        await bossTracker.loadBossesFromChannel();
+        
+        const allBosses = bossTracker.getAllBosses();
+        const activeBosses = bossTracker.getActiveBosses();
+        
+        const recoveryEmbed = new EmbedBuilder()
+            .setTitle('🔄 Boss Recovery Completed')
+            .setColor(0x00FF00)
+            .addFields([
+                { name: '📊 Total Bosses Loaded', value: `${allBosses.length}`, inline: true },
+                { name: '🟢 Active Bosses', value: `${activeBosses.length}`, inline: true },
+                { name: '🔴 Respawned Bosses', value: `${allBosses.length - activeBosses.length}`, inline: true }
+            ])
+            .setTimestamp()
+            .setFooter({ text: 'All boss data has been reloaded from storage' });
+
+        if (allBosses.length > 0) {
+            // Add a preview of the first few bosses
+            const previewBosses = allBosses.slice(0, 24);
+            const previewText = previewBosses.map(boss => {
+                const status = new Date(boss.nextRespawn) > Date.now() ? '🟢' : '🔴';
+                return `${status} ${boss.name} (${boss.deathTime})`;
+            }).join('\n');
+            
+            recoveryEmbed.addFields({
+                name: '👁️ Preview (Latest 5)',
+                value: previewText,
+                inline: false
+            });
+        }
+
+        await interaction.editReply({ embeds: [recoveryEmbed] });
+        
+    } catch (error) {
+        console.error('Error recovering bosses:', error);
+        await interaction.editReply(`❌ Error recovering bosses: ${error.message}`);
+    }
+    break;
 
             case 'boss_status':
                 const bossName = interaction.options.getString('name');
