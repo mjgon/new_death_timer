@@ -19,7 +19,7 @@ const commands = [
         .setDescription('List all active boss respawns'),
     
     new SlashCommandBuilder()
-        .setName('allbosses1')
+        .setName('allbosses')
         .setDescription('List all tracked bosses (active and respawned)'),
     
     new SlashCommandBuilder()
@@ -86,7 +86,7 @@ class BossTracker {
         this.notificationChannel = null;
         this.bosses = new Map(); // Cache for faster access
         this.initialized = false;
-        this.notifiedBosses = new Set(); // Track which bosses we've already notified about
+        // Store notification status in boss data instead of separate Set
     }
 
     async initialize() {
@@ -143,9 +143,14 @@ class BossTracker {
                                     if (addedAtDate) bossData.addedAt = addedAtDate.toISOString();
                                 }
                                 
+                                // Check if boss has already respawned - if so, mark as notified
+                                const now = new Date();
+                                const respawnTime = new Date(bossData.nextRespawn);
+                                bossData.hasNotified = respawnTime <= now;
+                                
                                 this.bosses.set(bossData.name.toLowerCase(), bossData);
                                 loadedCount++;
-                                console.log(`Loaded boss: ${bossData.name}`);
+                                console.log(`Loaded boss: ${bossData.name} (Notified: ${bossData.hasNotified})`);
                             }
                         } catch (error) {
                             console.error('Error parsing boss embed:', error);
@@ -189,7 +194,8 @@ class BossTracker {
                 lastDeath: fields.find(f => f.name === '🕒 Last Death')?.value,
                 nextRespawn: fields.find(f => f.name === '🔄 Next Respawn')?.value,
                 addedAt: fields.find(f => f.name === '📅 Added At')?.value,
-                messageId: messageId
+                messageId: messageId,
+                hasNotified: false // Default to not notified
             };
             
             // Validate required fields
@@ -215,10 +221,10 @@ class BossTracker {
         let removedBosses = [];
 
         for (const [key, boss] of this.bosses.entries()) {
-            if (new Date(boss.nextRespawn) <= now) {
-                // Check if we need to send spawn notification
-                await this.sendSpawnNotification(boss);
-                
+            const respawnTime = new Date(boss.nextRespawn);
+            
+            // Only remove if boss has respawned AND we've already notified
+            if (respawnTime <= now && boss.hasNotified) {
                 // Delete the message from storage channel
                 try {
                     const message = await this.storageChannel.messages.fetch(boss.messageId);
@@ -239,12 +245,6 @@ class BossTracker {
     }
 
     async sendSpawnNotification(boss) {
-        // Check if we already notified about this boss spawn
-        const notificationKey = `${boss.name.toLowerCase()}_${boss.nextRespawn}`;
-        if (this.notifiedBosses.has(notificationKey)) {
-            return; // Already notified
-        }
-
         try {
             const embed = new EmbedBuilder()
                 .setTitle('🚨 BOSS RESPAWNED! 🚨')
@@ -263,8 +263,10 @@ class BossTracker {
                 embeds: [embed]
             });
 
-            // Mark this boss as notified
-            this.notifiedBosses.add(notificationKey);
+            // Mark this boss as notified and update storage
+            boss.hasNotified = true;
+            await this.updateBossInChannel(boss);
+            
             console.log(`🚨 Sent spawn notification for: ${boss.name}`);
             
         } catch (error) {
@@ -279,10 +281,9 @@ class BossTracker {
         
         for (const [key, boss] of this.bosses.entries()) {
             const respawnTime = new Date(boss.nextRespawn);
-            const notificationKey = `${boss.name.toLowerCase()}_${boss.nextRespawn}`;
-            
-            // If boss has respawned and we haven't notified yet
-            if (respawnTime <= now && !this.notifiedBosses.has(notificationKey)) {
+            // Only notify if boss has respawned AND we haven't notified yet
+            if (respawnTime <= now && !boss.hasNotified) {
+                console.log(`Boss ${boss.name} has respawned! Sending notification...`);
                 await this.sendSpawnNotification(boss);
             }
         }
@@ -401,7 +402,8 @@ class BossTracker {
                 { name: '⏱️ Respawn Duration', value: bossData.respawnDuration, inline: true },
                 { name: '🕒 Last Death', value: bossTracker.formatDateTime(new Date(bossData.lastDeath)), inline: true },
                 { name: '🔄 Next Respawn', value: bossTracker.formatDateTime(new Date(bossData.nextRespawn)), inline: true },
-                { name: '📅 Added At', value: bossTracker.formatDateTime(new Date(bossData.addedAt)), inline: true }
+                { name: '📅 Added At', value: bossTracker.formatDateTime(new Date(bossData.addedAt)), inline: true },
+                { name: '🚨 Notified', value: bossData.hasNotified ? 'Yes' : 'No', inline: true } // Track notification status
             ])
             .setTimestamp()
             .setFooter({ text: 'Boss Storage Data' });
@@ -423,7 +425,8 @@ class BossTracker {
                     { name: '⏱️ Respawn Duration', value: bossData.respawnDuration, inline: true },
                     { name: '🕒 Last Death', value: bossTracker.formatDateTime(new Date(bossData.lastDeath)), inline: true },
                     { name: '🔄 Next Respawn', value: bossTracker.formatDateTime(new Date(bossData.nextRespawn)), inline: true },
-                    { name: '📅 Added At', value: bossTracker.formatDateTime(new Date(bossData.addedAt)), inline: true }
+                    { name: '📅 Added At', value: bossTracker.formatDateTime(new Date(bossData.addedAt)), inline: true },
+                    { name: '🚨 Notified', value: bossData.hasNotified ? 'Yes' : 'No', inline: true } // Track notification status
                 ])
                 .setTimestamp()
                 .setFooter({ text: 'Boss Storage Data - Updated' });
@@ -456,7 +459,8 @@ class BossTracker {
             nextRespawn: timeData.respawnDateTime.toISOString(),
             isActive: timeData.isActive,
             inputMessageId,
-            addedAt: new Date().toISOString()
+            addedAt: new Date().toISOString(),
+            hasNotified: false // New boss, not notified yet
         };
 
         // Check if boss already exists
@@ -464,9 +468,10 @@ class BossTracker {
         
         let storageMessageId;
         if (existingBoss) {
-            // Update existing boss
+            // Update existing boss - reset notification status for new death
             bossData.messageId = existingBoss.messageId;
             bossData.addedAt = existingBoss.addedAt; // Keep original added time
+            bossData.hasNotified = false; // Reset notification for new death
             storageMessageId = await this.updateBossInChannel(bossData);
         } else {
             // Save new boss to storage channel
@@ -652,7 +657,7 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply({ embeds: [embed] });
                 break;
 
-           case 'allbosses1':
+           case 'allbosses':
     const allBosses = bossTracker.getAllBosses();
     
     if (allBosses.length === 0) {
